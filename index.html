@@ -174,35 +174,61 @@ function checkAlerts(tfKey, klines, cooldownMs, symbol){
 
 
 let symbol=document.getElementById('symbolInput').value.trim().toUpperCase();
-async function loadAll(){
-  symbol=document.getElementById('symbolInput').value.trim().toUpperCase();
-  let limit=parseInt(document.getElementById('limitInput').value)||100;
+async function loadAll(symbol){
+  let limit = parseInt(document.getElementById('limitInput').value) || 100;
   let alerts = [];
-  for(const tf of timeframes){
-    try{
-      const klines=await fetchKlines(symbol,tf.interval,limit);
-      const prep=prepareSeries(klines);
+
+  for (const tf of timeframes) {
+    try {
+      const klines = await fetchKlines(symbol, tf.interval, limit);
+      const prep = prepareSeries(klines);
+
       charts[tf.key].candleSeries.setData(prep.candleData);
       charts[tf.key].upperSeries.setData(prep.upper);
       charts[tf.key].middleSeries.setData(prep.middle);
       charts[tf.key].lowerSeries.setData(prep.lower);
-      charts[tf.key].infoEl.textContent=`last ${new Date(klines.at(-1).time*1000).toLocaleString()} close ${klines.at(-1).close}`;
-      charts[tf.key].chart.timeScale().fitContent();
-charts[tf.key].chart.timeScale().applyOptions({
-  rightOffset: 8,  // khoảng trống bên phải
-  barSpacing: 9    // độ rộng nến
-});
-      const alertMsg = checkAlerts(tf.key,klines,tf.cooldownMs,symbol);
-      if(alertMsg) alerts.push(alertMsg);
 
-    }catch(e){console.error(e);}
+      charts[tf.key].infoEl.textContent = 
+        `last ${new Date(klines.at(-1).time*1000).toLocaleString()} close ${klines.at(-1).close}`;
+
+      charts[tf.key].chart.timeScale().fitContent();
+      charts[tf.key].chart.timeScale().applyOptions({
+        rightOffset: 8,
+        barSpacing: 9
+      });
+
+      const alertMsg = checkAlerts(tf.key, klines, tf.cooldownMs, symbol);
+      if (alertMsg) alerts.push(alertMsg);
+
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  // Sau khi check xong hết timeframe → gửi 1 lần
-  if(alerts.length > 0){
+  if (alerts.length > 0) {
     await sendTelegram(alerts.join("\n"));
   }
 }
+
+const symbols = ["BTCUSDT", "ETHUSDT"];
+let currentIndex = 0;
+
+async function cycleLoad(){
+  const symbol = symbols[currentIndex];
+  console.log("Đang load:", symbol);
+  await loadAll(symbol);
+
+  // xoay vòng
+  currentIndex = (currentIndex + 1) % symbols.length;
+}
+
+// chạy lần đầu
+cycleLoad();
+
+// lặp lại sau mỗi 15s
+setInterval(cycleLoad, 15000);
+
+
 
 
 // auto reload
