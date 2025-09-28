@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Trader Dashboard - 4TF</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <style>
+    body {
+      font-family: Inter, system-ui, Arial;
+      margin: 12px;
+      background: #002044;
+      color: #e6eef8;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .panel {
+      background: #111827;
+      padding: 8px;
+      border-radius: 8px;
+    }
+    .chart {
+      height: 320px;
+    }
+    .minor {
+      font-size: 12px;
+      color: #e6eef8;
+    }
+    button {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <label>
+      Symbol: <input id="symbolInput" type="text" value="MYXUSDT" />
+    </label>
+    <label>
+      Limit: <input id="limitInput" type="number" value="100" min="30" max="500" />
+    </label>
+    <button id="viewBtn" style="background:#0ea5a6;color:#042024;">Views</button>
+    <span id="countdown">20s</span>
+    <button id="captureBtn" style="background:#3b82f6;color:#fff;">📸 Capture & Send Test</button>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div>5m <span id="info-5m" class="minor"></span></div>
+      <div class="chart" id="chart-5m"></div>
+    </div>
+    <div class="panel">
+      <div>15m <span id="info-15m" class="minor"></span></div>
+      <div class="chart" id="chart-15m"></div>
+    </div>
+     <div class="panel">
+      <div>30m <span id="info-30m" class="minor"></span></div>
+      <div class="chart" id="chart-30m"></div>
+    </div>
+    <div class="panel">
+      <div>1h <span id="info-1h" class="minor"></span></div>
+      <div class="chart" id="chart-1h"></div>
+    </div>
+    <div class="panel">
+      <div>4h <span id="info-4h" class="minor"></span></div>
+      <div class="chart" id="chart-4h"></div>
+    </div>
+        <div class="panel">
+      <div>1d<span id="info-1d" class="minor"></span></div>
+      <div class="chart" id="chart-1d"></div>
+    </div>
+  </div>
+
+  <script>
+    const TELEGRAM_TOKEN = "8413345761:AAFy_T3G9afclAqO_DOL23y-83Z_VnxE0sw";
+    const TELEGRAM_CHATID = "6549625165";
+
+    const timeframes = [
+      { key: '5m', interval: '5m', panelId: 'chart-5m', infoId: 'info-5m', cooldownMs: 15 * 60 * 1000 },
+      { key: '15m', interval: '15m', panelId: 'chart-15m', infoId: 'info-15m', cooldownMs: 60 * 60 * 1000 },
+      { key: '30m', interval: '30m', panelId: 'chart-30m', infoId: 'info-30m', cooldownMs: 60 * 60 * 1000 },
+      { key: '1h', interval: '1h', panelId: 'chart-1h', infoId: 'info-1h', cooldownMs: 4 * 60 * 60 * 1000 },
+      { key: '4h', interval: '4h', panelId: 'chart-4h', infoId: 'info-4h', cooldownMs: 10 * 60 * 60 * 1000 },
+      { key: '1d', interval: '1d', panelId: 'chart-1d', infoId: 'info-1d', cooldownMs: 10 *60 * 60 * 1000 }
+    ];
+
+    const BB_PERIOD = 20, BB_MULT = 2;
+    const charts = {}, lastAlertAt = {};
+
+    for (const tf of timeframes) {
+      const chart = LightweightCharts.createChart(document.getElementById(tf.panelId), {
+        layout: { background: { color: '#cae1fa' }, textColor: '#002044' },
+        rightPriceScale: { borderVisible: false },
+        timeScale: { borderVisible: false }
+      });
+
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+        borderVisible: false
+      });
+
+      const upperSeries = chart.addLineSeries({ color: '#7c3aed', lineWidth: 1 });
+      const middleSeries = chart.addLineSeries({ color: '#60a5fa', lineWidth: 1 });
+      const lowerSeries = chart.addLineSeries({ color: '#7c3aed', lineWidth: 1 });
+
+      charts[tf.key] = {
+        chart, candleSeries, upperSeries, middleSeries, lowerSeries,
+        infoEl: document.getElementById(tf.infoId)
+      };
+    }
+
+    async function fetchKlines(symbol, interval, limit = 100) {
+      const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.map(k => ({
+        time: Math.floor(k[0] / 1000),
+        open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5]
+      }));
+    }
+
+    function sma(values, i, period) {
+      if (i + 1 < period) return null;
+      let sum = 0;
+      for (let j = i - period + 1; j <= i; j++) sum += values[j];
+      return sum / period;
+    }
+
+    function stddev(values, i, period, mean) {
+      let s = 0;
+      for (let j = i - period + 1; j <= i; j++) {
+        let d = values[j] - mean;
+        s += d * d;
+      }
+      return Math.sqrt(s / period);
+    }
+
+    function prepareSeries(klines) {
+      const closes = klines.map(k => k.close);
+      const upper = [], middle = [], lower = [];
+
+      for (let i = 0; i < closes.length; i++) {
+        const m = sma(closes, i, BB_PERIOD);
+        if (m != null) {
+          const sd = stddev(closes, i, BB_PERIOD, m);
+          middle.push({ time: klines[i].time, value: m });
+          upper.push({ time: klines[i].time, value: m + BB_MULT * sd });
+          lower.push({ time: klines[i].time, value: m - BB_MULT * sd });
+        }
+      }
+      return { candleData: klines, upper, middle, lower };
+    }
+
+    function addMarker(tfKey, time, price, type) {
+      const marker = {
+        time,
+        position: type === "upper" ? 'aboveBar' : 'belowBar',
+        color: 'red',
+        shape: type === "upper" ? 'arrowDown' : 'arrowUp',
+        text: 'BB'
+      };
+      charts[tfKey].markers = charts[tfKey].markers || [];
+      charts[tfKey].markers.push(marker);
+      charts[tfKey].candleSeries.setMarkers(charts[tfKey].markers);
+    }
+
+    async function sendTelegram(msg) {
+      try {
+        await loadAll(); // load lại chart
+        await new Promise(r => setTimeout(r, 3000)); // đợi render
+
+        const gridEl = document.querySelector(".grid");
+        const canvas = await html2canvas(gridEl, { backgroundColor: "#cae1fa", scale: 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+
+        const fd = new FormData();
+        fd.append("chat_id", TELEGRAM_CHATID);
+        fd.append("caption", msg);
+        fd.append("photo", blob, "charts.png");
+
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, { method: "POST", body: fd });
+        console.log("✅ Đã gửi ảnh Telegram thành công");
+      } catch (err) {
+        console.error("❌ Lỗi khi gửi Telegram:", err);
+      }
+    }
+
+    function checkAlerts(tfKey, klines, cooldownMs, symbol) {
+      if (!klines || klines.length < BB_PERIOD) return null;
+      if (!lastAlertAt[tfKey]) lastAlertAt[tfKey] = { upper: 0, lower: 0 };
+
+      const last = klines[klines.length - 1];
+      const closes = klines.map(k => k.close);
+      const idx = closes.length - 1;
+
+      const m = sma(closes, idx, BB_PERIOD);
+      if (m === null) return null;
+
+      const sd = stddev(closes, idx, BB_PERIOD, m);
+      const upper = m + BB_MULT * sd;
+      const lower = m - BB_MULT * sd;
+      const now = Date.now();
+
+      const msgs = [];
+      if (last.high >= upper && now - lastAlertAt[tfKey].upper >= cooldownMs) {
+        addMarker(tfKey, last.time, last.high, "upper");
+        lastAlertAt[tfKey].upper = now;
+        msgs.push(`[TOUCH] ${symbol} ${tfKey} HIGH ${last.high} >= BB_TOP ${upper.toFixed(8)}`);
+      }
+      if (last.low <= lower && now - lastAlertAt[tfKey].lower >= cooldownMs) {
+        addMarker(tfKey, last.time, last.low, "lower");
+        lastAlertAt[tfKey].lower = now;
+        msgs.push(`[TOUCH] ${symbol} ${tfKey} LOW ${last.low} <= BB_BOT ${lower.toFixed(8)}`);
+      }
+      return msgs.length ? msgs.join("\n") : null;
+    }
+
+    async function loadAll(symbol) {
+      symbol = (symbol || document.getElementById('symbolInput').value).trim().toUpperCase();
+      let limit = parseInt(document.getElementById('limitInput').value) || 100;
+      let alerts = [];
+
+      for (const tf of timeframes) {
+        try {
+          const klines = await fetchKlines(symbol, tf.interval, limit);
+          const prep = prepareSeries(klines);
+
+          charts[tf.key].candleSeries.setData(prep.candleData);
+          charts[tf.key].upperSeries.setData(prep.upper);
+          charts[tf.key].middleSeries.setData(prep.middle);
+          charts[tf.key].lowerSeries.setData(prep.lower);
+
+          charts[tf.key].infoEl.textContent =
+            `last ${new Date(klines.at(-1).time * 1000).toLocaleString()} close ${klines.at(-1).close}`;
+
+          charts[tf.key].chart.timeScale().fitContent();
+          charts[tf.key].chart.timeScale().applyOptions({ rightOffset: 8, barSpacing: 9 });
+
+          const alertMsg = checkAlerts(tf.key, klines, tf.cooldownMs, symbol);
+          if (alertMsg) alerts.push(alertMsg);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      if (alerts.length > 0) await sendTelegram(alerts.join("\n"));
+    }
+
+    let countdown = 20, timer;
+    function startCountdown() {
+      clearInterval(timer);
+      countdown = 20;
+      timer = setInterval(() => {
+        countdown--;
+        document.getElementById('countdown').textContent = countdown + "s";
+        if (countdown <= 0) {
+          loadAll();
+          countdown = 20;
+        }
+      }, 1000);
+    }
+
+    document.getElementById('viewBtn').addEventListener('click', () => {
+      loadAll();
+      startCountdown();
+    });
+
+    document.getElementById('captureBtn').addEventListener('click', () => sendTelegram("📸 Test capture từ dashboard"));
+
+     let pollingStopped = false;
+let tgUpdateOffset = 0;
+
+async function pollTelegram() {
+  if (pollingStopped) return;
+  try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getUpdates?offset=${tgUpdateOffset}&timeout=5`;
+    const res = await fetch(url);
+    const j = await res.json();
+
+    if (j && j.ok && Array.isArray(j.result) && j.result.length > 0) {
+      for (const upd of j.result) {
+        if (upd.update_id != null) tgUpdateOffset = upd.update_id + 1;
+
+        const msg = upd.message || upd.channel_post || upd.edited_message;
+        if (!msg) continue;
+        const text = (msg.text || msg.caption || "").trim().toLowerCase();
+        const chatId = msg.chat && msg.chat.id;
+        if (!chatId) continue;
+
+        if (text === "view") {   // <-- so sánh đúng lowercase
+          const who = msg.from
+            ? (msg.from.username || `${msg.from.first_name || ""} ${msg.from.last_name || ""}`).trim()
+            : "user";
+          const caption = `📸 View requested by ${who} — symbol: ${document.getElementById('symbolInput').value}`;
+          console.log("📩 Nhận lệnh VIEW từ", who, chatId);
+          await captureAndSendToChat(chatId, caption);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("pollTelegram error:", err);
+  } finally {
+    setTimeout(pollTelegram, 3000);
+  }
+}
+async function captureAndSendToChat(chatId, caption) {
+  try {
+    const gridEl = document.querySelector(".grid");
+    const canvas = await html2canvas(gridEl, { backgroundColor: "#cae1fa", scale: 2 });
+    const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+
+    const fd = new FormData();
+    fd.append("chat_id", chatId);
+    fd.append("caption", caption);
+    fd.append("photo", blob, "charts.png");
+
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto`, {
+      method: "POST",
+      body: fd
+    });
+    console.log("✅ Ảnh đã gửi Telegram");
+  } catch (err) {
+    console.error("❌ Lỗi captureAndSendToChat:", err);
+  }
+}
+
+    loadAll();
+    startCountdown();
+    setInterval(loadAll, 15000);
+    
+  pollTelegram();
+  </script>
+</body>
+</html>
