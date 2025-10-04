@@ -251,7 +251,34 @@
             `last ${new Date(klines.at(-1).time * 1000).toLocaleString()} close ${klines.at(-1).close}`;
 
           charts[tf.key].chart.timeScale().fitContent();
-          charts[tf.key].chart.timeScale().applyOptions({ rightOffset: 8, barSpacing: 9 });
+       if (tf.key === "5m") {
+  charts[tf.key].chart.timeScale().applyOptions({
+    handleScroll: { mouseWheel: true, pressedMouseMove: true },
+    handleScale: { mouseWheel: true, pinch: true },
+    rightOffset: 8,
+    barSpacing: 9 * 0.6
+  });
+}      else if (tf.key === "15m") {
+  charts[tf.key].chart.timeScale().applyOptions({
+    handleScroll: { mouseWheel: true, pressedMouseMove: true },
+    handleScale: { mouseWheel: true, pinch: true },
+    rightOffset: 8,
+    barSpacing: 9 * 0.7
+  });
+}     else  if (tf.key === "30m") {
+  charts[tf.key].chart.timeScale().applyOptions({
+    handleScroll: { mouseWheel: true, pressedMouseMove: true },
+    handleScale: { mouseWheel: true, pinch: true },
+    rightOffset: 8,
+    barSpacing: 9 * 0.8
+  });
+}
+else {
+  charts[tf.key].chart.timeScale().applyOptions({
+    rightOffset: 8,
+    barSpacing: 9
+  });
+}
 
           const alertMsg = checkAlerts(tf.key, klines, tf.cooldownMs, symbol);
           if (alertMsg) alerts.push(alertMsg);
