@@ -46,33 +46,13 @@
 </head>
 <body>
   <div class="controls">
-    <label>
-      Symbol: <input id="symbolInput" type="text" value="MYXUSDT" />
-    </label>
-    <label>
-      Limit: <input id="limitInput" type="number" value="150" min="30" max="500" />
-    </label>
-    <button id="viewBtn" style="background:#0ea5a6;color:#042024;">Views</button>
-    <span id="countdown">20s</span>
-    <button id="captureBtn" style="background:#3b82f6;color:#fff;">📸 Capture & Send Test</button>
-
-<a href="index2.html">Chuyển sang trang 2</a>
-
+<h1 id="currentSymbol" style="margin-left:12px;font-weight:bold;color:#22d3ee;">Symbol: ...</h1>
+<button id="btnTopLiquidity">Top 30 Coin</button>
+<ul id="topLiquidityList"></ul>
   </div>
 
   <div class="grid">
-    <div class="panel">
-      <div>5m <span id="info-5m" class="minor"></span></div>
-      <div class="chart" id="chart-5m"></div>
-    </div>
-    <div class="panel">
-      <div>15m <span id="info-15m" class="minor"></span></div>
-      <div class="chart" id="chart-15m"></div>
-    </div>
-     <div class="panel">
-      <div>30m <span id="info-30m" class="minor"></span></div>
-      <div class="chart" id="chart-30m"></div>
-    </div>
+
     <div class="panel">
       <div>1h <span id="info-1h" class="minor"></span></div>
       <div class="chart" id="chart-1h"></div>
@@ -88,13 +68,67 @@
   </div>
 
   <script>
+
+
+
+let topSymbols = []; // 🟢 Biến toàn cục để lưu danh sách symbol
+let symbolcoin = "";
+
+document.getElementById('btnTopLiquidity').addEventListener('click', async () => {
+  const btn = document.getElementById('btnTopLiquidity');
+  const list = document.getElementById('topLiquidityList');
+  btn.disabled = true;
+  btn.textContent = 'Đang tải...';
+
+  try {
+    // Gọi API 24h ticker
+    const res = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+    const data = await res.json();
+
+    // Sắp xếp theo volume USD giảm dần
+    const top30 = data
+      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+      .slice(0, 30);
+
+    // 🟡 Cập nhật danh sách symbol toàn cục
+    topSymbols = top30.map(item => item.symbol);
+
+    console.log("✅ topSymbols:", topSymbols);
+
+    // 🔥 Gọi luôn quét toàn bộ symbol
+    await scanAllSymbols();
+
+    // Hiển thị danh sách
+    list.innerHTML = top30
+      .map(
+        (item, i) =>
+          `<li>${i + 1}. <strong>${item.symbol}</strong> — Volume: ${parseFloat(item.quoteVolume).toLocaleString()} USDT</li>`
+      )
+      .join('');
+
+  } catch (err) {
+    console.error('Lỗi khi tải dữ liệu:', err);
+    list.innerHTML = '<li>Lỗi khi tải dữ liệu!</li>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Top 30 Coin Thanh Khoản Cao Nhất';
+  }
+});
+
+async function scanAllSymbols() {
+  for (const symbol of topSymbols) {
+    symbolcoin = symbol;
+    console.log(`🔍 Đang quét ${symbol}...`);
+    await loadAll(symbol); // chạy từng coin
+    await new Promise(r => setTimeout(r, 15000)); // nghỉ 8s để tránh spam API
+  }
+}
+
+
     const TELEGRAM_TOKEN = "8413345761:AAFy_T3G9afclAqO_DOL23y-83Z_VnxE0sw";
     const TELEGRAM_CHATID = "6549625165";
-
+    let scanall = "no"; 
     const timeframes = [
-      { key: '5m', interval: '5m', panelId: 'chart-5m', infoId: 'info-5m', cooldownMs: 15 * 60 * 1000 },
-      { key: '15m', interval: '15m', panelId: 'chart-15m', infoId: 'info-15m', cooldownMs: 60 * 60 * 1000 },
-      { key: '30m', interval: '30m', panelId: 'chart-30m', infoId: 'info-30m', cooldownMs: 60 * 60 * 1000 },
       { key: '1h', interval: '1h', panelId: 'chart-1h', infoId: 'info-1h', cooldownMs: 4 * 60 * 60 * 1000 },
       { key: '4h', interval: '4h', panelId: 'chart-4h', infoId: 'info-4h', cooldownMs: 10 * 60 * 60 * 1000 },
       { key: '1d', interval: '1d', panelId: 'chart-1d', infoId: 'info-1d', cooldownMs: 10 *60 * 60 * 1000 }
@@ -126,7 +160,7 @@
       };
     }
 
-    async function fetchKlines(symbol, interval, limit = 100) {
+    async function fetchKlines(symbol, interval, limit = 150) {
       const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
       const res = await fetch(url);
       const data = await res.json();
@@ -182,8 +216,7 @@
     }
 
     async function sendTelegram(msg) {
-      try {
-        await loadAll(); // load lại chart
+      try {// load lại chart
         await new Promise(r => setTimeout(r, 3000)); // đợi render
 
         const gridEl = document.querySelector(".grid");
@@ -233,8 +266,8 @@
     }
 
     async function loadAll(symbol) {
-      symbol = (symbol || document.getElementById('symbolInput').value).trim().toUpperCase();
-      let limit = parseInt(document.getElementById('limitInput').value) || 100;
+      document.getElementById('currentSymbol').textContent = "Symbol: " + symbol;
+      let limit = 150;
       let alerts = [];
 
       for (const tf of timeframes) {
@@ -246,12 +279,32 @@
           charts[tf.key].upperSeries.setData(prep.upper);
           charts[tf.key].middleSeries.setData(prep.middle);
           charts[tf.key].lowerSeries.setData(prep.lower);
-
           charts[tf.key].infoEl.textContent =
             `last ${new Date(klines.at(-1).time * 1000).toLocaleString()} close ${klines.at(-1).close}`;
 
           charts[tf.key].chart.timeScale().fitContent();
-          charts[tf.key].chart.timeScale().applyOptions({ rightOffset: 8, barSpacing: 9 });
+      if (tf.key === "1h") {
+  charts[tf.key].chart.timeScale().applyOptions({
+    handleScroll: { mouseWheel: true, pressedMouseMove: true },
+    handleScale: { mouseWheel: true, pinch: true },
+    rightOffset: 8,
+    barSpacing: 9 * 0.7
+  });
+} 
+      else if (tf.key === "4h") {
+  charts[tf.key].chart.timeScale().applyOptions({
+    handleScroll: { mouseWheel: true, pressedMouseMove: true },
+    handleScale: { mouseWheel: true, pinch: true },
+    rightOffset: 8,
+    barSpacing: 9 * 0.7
+  });
+} 
+else {
+  charts[tf.key].chart.timeScale().applyOptions({
+    rightOffset: 8,
+    barSpacing: 9 *0.8
+  });
+}
 
           const alertMsg = checkAlerts(tf.key, klines, tf.cooldownMs, symbol);
           if (alertMsg) alerts.push(alertMsg);
@@ -262,63 +315,17 @@
       if (alerts.length > 0) await sendTelegram(alerts.join("\n"));
     }
 
-    let countdown = 20, timer;
-    function startCountdown() {
-      clearInterval(timer);
-      countdown = 20;
-      timer = setInterval(() => {
-        countdown--;
-        document.getElementById('countdown').textContent = countdown + "s";
-        if (countdown <= 0) {
-          loadAll();
-          countdown = 20;
-        }
-      }, 1000);
-    }
 
     document.getElementById('viewBtn').addEventListener('click', () => {
+      if(scanall==="no"){
       loadAll();
-      startCountdown();
+      startCountdown();}
     });
 
     document.getElementById('captureBtn').addEventListener('click', () => sendTelegram("📸 Test capture từ dashboard"));
 
      let pollingStopped = false;
 let tgUpdateOffset = 0;
-
-async function pollTelegram() {
-  if (pollingStopped) return;
-  try {
-    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getUpdates?offset=${tgUpdateOffset}&timeout=5`;
-    const res = await fetch(url);
-    const j = await res.json();
-
-    if (j && j.ok && Array.isArray(j.result) && j.result.length > 0) {
-      for (const upd of j.result) {
-        if (upd.update_id != null) tgUpdateOffset = upd.update_id + 1;
-
-        const msg = upd.message || upd.channel_post || upd.edited_message;
-        if (!msg) continue;
-        const text = (msg.text || msg.caption || "").trim().toLowerCase();
-        const chatId = msg.chat && msg.chat.id;
-        if (!chatId) continue;
-
-        if (text === "view") {   // <-- so sánh đúng lowercase
-          const who = msg.from
-            ? (msg.from.username || `${msg.from.first_name || ""} ${msg.from.last_name || ""}`).trim()
-            : "user";
-          const caption = `📸 View requested by ${who} — symbol: ${document.getElementById('symbolInput').value}`;
-          console.log("📩 Nhận lệnh VIEW từ", who, chatId);
-          await captureAndSendToChat(chatId, caption);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("pollTelegram error:", err);
-  } finally {
-    setTimeout(pollTelegram, 3000);
-  }
-}
 async function captureAndSendToChat(chatId, caption) {
   try {
     const gridEl = document.querySelector(".grid");
@@ -340,11 +347,11 @@ async function captureAndSendToChat(chatId, caption) {
   }
 }
 
-    loadAll();
-    startCountdown();
-    setInterval(loadAll, 15000);
-    
-  pollTelegram();
+  document.getElementById('btnScanAll').addEventListener('click', () => {
+  scanAllSymbols();
+});
+
   </script>
+
 </body>
 </html>
